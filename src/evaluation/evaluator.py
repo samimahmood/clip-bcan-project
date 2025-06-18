@@ -29,7 +29,9 @@ class Evaluator:
         
         # Assuming 5 captions per image
         captions_per_image = 5
-        n_unique_images = n_images
+        
+        # Handle case where we have fewer images than expected
+        n_unique_images = min(n_images, n_captions // captions_per_image)
         
         ranks = np.zeros(n_unique_images)
         top1 = np.zeros(n_unique_images)
@@ -45,14 +47,19 @@ class Evaluator:
             
             # Find the rank of the first correct caption
             # Correct captions are at indices [i*5, i*5+1, ..., i*5+4]
-            correct_indices = list(range(i * captions_per_image, (i + 1) * captions_per_image))
+            correct_indices = list(range(i * captions_per_image, min((i + 1) * captions_per_image, n_captions)))
             
             # Find minimum rank among correct captions
             min_rank = n_captions
             for idx in correct_indices:
-                rank = np.where(sorted_indices == idx)[0][0]
-                if rank < min_rank:
-                    min_rank = rank
+                try:
+                    rank_positions = np.where(sorted_indices == idx)[0]
+                    if len(rank_positions) > 0:
+                        rank = rank_positions[0]
+                        if rank < min_rank:
+                            min_rank = rank
+                except:
+                    continue
             
             ranks[i] = min_rank
             
@@ -65,11 +72,11 @@ class Evaluator:
                 top10[i] = 1
         
         # Compute metrics
-        r1 = 100.0 * np.sum(top1) / n_unique_images
-        r5 = 100.0 * np.sum(top5) / n_unique_images
-        r10 = 100.0 * np.sum(top10) / n_unique_images
+        r1 = 100.0 * np.sum(top1) / n_unique_images if n_unique_images > 0 else 0
+        r5 = 100.0 * np.sum(top5) / n_unique_images if n_unique_images > 0 else 0
+        r10 = 100.0 * np.sum(top10) / n_unique_images if n_unique_images > 0 else 0
         
-        mean_rank = ranks.mean() + 1  # Add 1 because ranks are 0-indexed
+        mean_rank = ranks.mean() + 1 if n_unique_images > 0 else 0  # Add 1 because ranks are 0-indexed
         
         results = {
             'R@1': r1,
@@ -112,10 +119,18 @@ class Evaluator:
             sorted_indices = np.argsort(sim_scores)[::-1]
             
             # Find the correct image for this caption
-            correct_image_idx = i // captions_per_image
+            correct_image_idx = min(i // captions_per_image, n_images - 1)
             
             # Find rank of correct image
-            rank = np.where(sorted_indices == correct_image_idx)[0][0]
+            try:
+                rank_positions = np.where(sorted_indices == correct_image_idx)[0]
+                if len(rank_positions) > 0:
+                    rank = rank_positions[0]
+                else:
+                    rank = n_images - 1  # If not found, assign worst rank
+            except:
+                rank = n_images - 1
+                
             ranks[i] = rank
             
             # Calculate recall metrics
@@ -127,11 +142,11 @@ class Evaluator:
                 top10[i] = 1
         
         # Compute metrics
-        r1 = 100.0 * np.sum(top1) / n_captions
-        r5 = 100.0 * np.sum(top5) / n_captions
-        r10 = 100.0 * np.sum(top10) / n_captions
+        r1 = 100.0 * np.sum(top1) / n_captions if n_captions > 0 else 0
+        r5 = 100.0 * np.sum(top5) / n_captions if n_captions > 0 else 0
+        r10 = 100.0 * np.sum(top10) / n_captions if n_captions > 0 else 0
         
-        mean_rank = ranks.mean() + 1  # Add 1 because ranks are 0-indexed
+        mean_rank = ranks.mean() + 1 if n_captions > 0 else 0  # Add 1 because ranks are 0-indexed
         
         results = {
             'R@1': r1,
@@ -152,8 +167,12 @@ class Evaluator:
             img_embs: image embeddings [n_images, embed_dim]
             txt_embs: text embeddings [n_captions, embed_dim]
         """
+        print(f"Evaluating with {img_embs.shape[0]} images and {txt_embs.shape[0]} captions")
+        
         # Compute similarity matrix
         sim_matrix = self.compute_similarity(img_embs, txt_embs)
+        
+        print(f"Similarity matrix shape: {sim_matrix.shape}")
         
         # Image-to-Text retrieval
         i2t_results = self.i2t(sim_matrix)
